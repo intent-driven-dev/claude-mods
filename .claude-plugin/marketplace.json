@@ -1,6 +1,6 @@
 {
   "name": "claude-mods",
-  "owner": { "name": "Hari Krishnan", "url": "https://github.com/harikrishnan83" },
+  "owner": { "name": "intent-driven-dev", "url": "https://github.com/intent-driven-dev" },
   "metadata": {
     "description": "Claude Code mods: live panes and hooks for everyday workflows",
     "version": "0.1.0"

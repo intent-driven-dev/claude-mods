@@ -13,8 +13,10 @@ Open-source mods for [Claude Code](https://claude.com/claude-code): live panes, 
 At the prompt of a Claude Code terminal session:
 
 ```
-/plugin install openspec-tui --marketplace harikrishnan83/claude-mods
+/plugin install openspec-tui --marketplace intent-driven-dev/claude-mods
 ```
+
+> While the repository is private, installing needs GitHub access to it: your `gh` or git credentials must be able to read `intent-driven-dev/claude-mods`.
 
 Answer `y` to add the marketplace, then choose a scope.
 
