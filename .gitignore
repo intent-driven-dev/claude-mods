@@ -1,0 +1,5 @@
+# Laid by Claude Code at every load; regenerated per build
+.claude-plugin/types/
+plugins/*/.claude-plugin/types/
+node_modules/
+.DS_Store

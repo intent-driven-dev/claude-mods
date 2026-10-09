@@ -1,0 +1,114 @@
+# openspec-tui
+
+A live side pane for [OpenSpec](https://github.com/Fission-AI/OpenSpec) inside Claude Code. It shows where your change is in its journey, which artifact Claude is writing, the task being implemented right now, and where every other active change stands.
+
+```
+OpenSpec · add-dark-mode
+schema: spec-driven
+────────────────────────────────────────
+✓ New / Explore
+✓ Propose  4/4
+  ├─ ✓ Proposal
+  ├─ ✓ Specs
+  ├─ ✓ Design
+  └─ ✓ Tasks
+● Apply  4/9
+    ███████████░░░░░░░░░░░░░
+    … 2 done above
+    ✓ 1.3 Add theme token
+    ▶ 2.1 Wire toggle into settings
+    ○ 2.2 Persist preference
+○ Verify
+○ Sync & Archive
+────────────────────────────────────────
+Next: /opsx:apply to work the tasks
+────────────────────────────────────────
+Working on
+  ▸ add-dark-mode  ·  Apply
+    from your last OpenSpec command or edit
+    last command: /opsx:apply
+────────────────────────────────────────
+Active changes (3)
+  ▸ add-dark-mode  ◑ Apply
+    fix-login      ◔ Propose
+    tidy-docs      ● Sync & Archive (ready)
+  /openspec-tui <name> to follow another
+```
+
+## What it shows
+
+- **The journey.** It starts with **New / Explore**, because exploring is optional and `/opsx:new` alone counts. Then comes **Propose**, then **Apply**, then **Verify**, and it ends with **Sync & Archive**, because `/opsx:sync` is optional before `/opsx:archive`.
+- **Propose, split by your schema.** Each artifact the change's schema defines is a sub-step under Propose, in the schema's own order. The default `spec-driven` schema gives proposal, specs, design and tasks. Each artifact shows one of these marks:
+  - `✓`: written.
+  - `✎ writing…`: Claude is writing it now.
+  - `● next`: the first one ready to write.
+  - `○`: ready to write.
+  - `· needs …`: blocked on other artifacts.
+- **The task in progress.** During Apply, `▶` marks the first unchecked task in `tasks.md`. It moves as Claude ticks the boxes.
+- **Working on.** Shows the change the pane follows and why it picked that one: you pinned it, your last OpenSpec command or edit named it, or it's the most recently changed.
+- **Active changes.** Lists every change under `openspec/changes/` with its stage: `◔ Propose`, `◑ Apply n/m` or `● Sync & Archive (ready)`.
+- **Status line.** Shows something like `OpenSpec: add-dark-mode · Propose › writing Design`. This helps on narrow terminals, where the pane does not dock.
+
+## Requirements
+
+- A Claude Code build with plugin function hooks (mods). It was built and tested on 2.1.294 and 2.1.295.
+- The [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) on your `PATH` (`npm i -g @fission-ai/openspec`). It was tested with 1.14.0.
+- A project initialised with `openspec init`.
+
+## Install
+
+At the prompt of a Claude Code terminal session:
+
+```
+/plugin install openspec-tui --marketplace harikrishnan83/claude-mods
+```
+
+Answer `y` to add the marketplace, then pick a scope. The user scope is the default. The pane opens by itself in fullscreen mode when the terminal is at least 144 columns wide.
+
+## Usage
+
+| Command | What it does |
+| --- | --- |
+| `/openspec-tui` | Open (or focus) the pane at any width |
+| `/openspec-tui <change>` | Pin the pane to one change |
+| `/openspec-tui auto` | Follow the latest change again |
+
+The pane updates as you work:
+- when an `/opsx:*` or `openspec-*` skill runs (typed by you or invoked by Claude);
+- when Claude writes a file under `openspec/changes/<name>/`;
+- when an `openspec` shell command runs;
+- at the end of every turn;
+- every 10 seconds, to catch edits made outside Claude.
+
+## How it works
+
+The pane never parses OpenSpec files itself. Its data comes from the CLI's JSON output:
+
+| Command | What the pane uses |
+| --- | --- |
+| `openspec list --json` | every active change and its task counts |
+| `openspec status --change <c> --json` | the schema's artifacts, their state and dependencies |
+| `openspec instructions apply --change <c> --json` | the task list and progress |
+| `openspec schemas --json` | the schema's artifacts before any change exists |
+
+Because the data comes from the CLI, custom schemas work without any changes.
+
+| File | Contents |
+| --- | --- |
+| `hooks/register.tsx` | hooks, refreshing, the pane |
+| `hooks/model.ts` | pure functions: parsing, phase and step derivation |
+| `types/index.d.ts` | the state contract |
+| `tests/` | `claude plugin test` suites (model and pane, on the terminal and desktop surfaces) |
+
+## Development
+
+```sh
+claude --plugin-dir ./plugins/openspec-tui   # run it from this folder; saves hot-reload
+claude plugin validate ./plugins/openspec-tui
+claude plugin test ./plugins/openspec-tui
+tsc -p ./plugins/openspec-tui                 # after one load has laid .claude-plugin/types
+```
+
+## License
+
+MIT
