@@ -3,3 +3,7 @@
 plugins/*/.claude-plugin/types/
 node_modules/
 .DS_Store
+
+# Local OpenSpec dev scaffolding (not part of the mods)
+.claude/
+openspec/
