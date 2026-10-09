@@ -17,6 +17,7 @@ import {
   parseList,
   parseSchemas,
   progressBar,
+  schemaFlow,
   schemaFromConfig,
   statusLine,
   taskWindow,
@@ -39,7 +40,7 @@ const NEXT_HINT: Record<string, string> = {
 }
 
 let isRefreshing = false
-/** The project's schema, read once per load: it only matters before a change exists. */
+/** The default schema's artifacts, fetched again only when `config.yaml` names another. */
 let schemaCache: OpenSpecSchema | undefined
 let isDirty = false
 
@@ -52,7 +53,26 @@ async function refreshOnce($: EngineInterface) {
   const now = await $.clock.now()
   let next: OpenSpecSnapshot
   try {
-    const { hasRoot, rootPath, changes } = parseList(await openspec($, ['list']))
+    const list = parseList(await openspec($, ['list']))
+    const { hasRoot, rootPath } = list
+    const readText = (path: string) => $.fs.read(path).catch(() => '')
+
+    // The project default (cheap to re-read, so edits to config.yaml show up)
+    // and each change's own schema from its .openspec.yaml.
+    const defaultSchema = rootPath
+      ? schemaFromConfig(await readText(`${rootPath}/openspec/config.yaml`))
+      : undefined
+    const changes = rootPath
+      ? await Promise.all(
+          list.changes.map(async c => ({
+            ...c,
+            schemaName:
+              schemaFromConfig(await readText(`${rootPath}/openspec/changes/${c.name}/.openspec.yaml`)) ??
+              defaultSchema,
+          })),
+        )
+      : list.changes
+
     const name = hasRoot
       ? chooseActive(changes, await read($, pinned), (await read($, activity)).hintedChange)
       : undefined
@@ -63,13 +83,18 @@ async function refreshOnce($: EngineInterface) {
         openspec($, ['instructions', 'apply', '--change', name]),
       ])
       active = parseActive(name, status, apply)
-    } else if (hasRoot && schemaCache === undefined) {
-      const config = rootPath
-        ? await $.fs.read(`${rootPath}/openspec/config.yaml`).catch(() => '')
-        : ''
-      schemaCache = parseSchemas(await openspec($, ['schemas']), schemaFromConfig(config))
     }
-    next = { hasRoot, changes, active, schema: schemaCache, refreshedAt: now }
+    if (hasRoot && (schemaCache === undefined || schemaCache.name !== defaultSchema)) {
+      schemaCache = parseSchemas(await openspec($, ['schemas']), defaultSchema)
+    }
+    next = {
+      hasRoot,
+      changes,
+      active,
+      schema: schemaCache,
+      defaultSchema: defaultSchema ?? schemaCache?.name,
+      refreshedAt: now,
+    }
   } catch (err) {
     const prev = await read($, snapshot)
     next = {
@@ -77,6 +102,7 @@ async function refreshOnce($: EngineInterface) {
       changes: prev?.changes ?? [],
       active: prev?.active,
       schema: prev?.schema,
+      defaultSchema: prev?.defaultSchema,
       error: err instanceof Error ? err.message : String(err),
       refreshedAt: now,
     }
@@ -223,10 +249,13 @@ export const register: Register = on => {
     const pin = await read($, pinned)
     const tasks = active?.tasks ?? []
     const current = currentTaskIndex(tasks)
-    const used = 4 + steps.length + 4 + 5 + 2 + snap.changes.length
+    const used = 5 + steps.length + 4 + 5 + 2 + snap.changes.length
     const room = Math.max(5, (e.props.scroll.bodyRows ?? 24) - used)
     const win = taskWindow(tasks, room)
     const schemaName = active?.schemaName || snap.schema?.name
+    const flow = schemaFlow(active ? active.artifacts.map(a => a.id) : (snap.schema?.artifacts ?? []))
+    const isOffDefault =
+      schemaName !== undefined && snap.defaultSchema !== undefined && schemaName !== snap.defaultSchema
     const rule = <Text dimColor>{'─'.repeat(Math.min(width, 48))}</Text>
     const why = !active
       ? undefined
@@ -260,7 +289,18 @@ export const register: Register = on => {
         <Text bold wrap="truncate-end">
           OpenSpec{active ? ` · ${active.name}` : ''}
         </Text>
-        {schemaName && <Text dimColor>schema: {schemaName}</Text>}
+        {schemaName && (
+          <Text wrap="truncate-end">
+            <Text bold>Schema: {schemaName}</Text>
+            {isOffDefault && <Text dimColor>  (project default: {snap.defaultSchema})</Text>}
+          </Text>
+        )}
+        {flow !== '' && (
+          <Text dimColor wrap="wrap">
+            {'  '}
+            {flow}
+          </Text>
+        )}
         {rule}
 
         {steps.map(s => {
@@ -353,6 +393,8 @@ export const register: Register = on => {
           const stage = changeStage(c)
           const label = isFollowed ? (liveStep?.label ?? stage.label) : stage.label
           const meter = ['◔', '◑', '●'][stage.rank]
+          const tag =
+            c.schemaName && c.schemaName !== snap.defaultSchema ? `  [${c.schemaName}]` : ''
           const name = c.name.length > nameWidth ? c.name.slice(0, nameWidth - 1) + '…' : c.name.padEnd(nameWidth)
           return (
             <Box flexDirection="row">
@@ -367,6 +409,7 @@ export const register: Register = on => {
                 dimColor={!isFollowed && stage.rank !== 2}
               >
                 {meter} {label}
+                {tag}
               </Text>
             </Box>
           )

@@ -17,6 +17,7 @@ export const statusWith = (tasks: 'done' | 'ready') => ({
   changeRoot: CHANGE_ROOT,
   isPlanningComplete: tasks === 'done',
   isComplete: false,
+  applyRequires: ['tasks'],
   nextSteps: ['Run openspec instructions tasks --change "add-dark-mode" --json before writing that artifact.'],
   artifacts: [
     { id: 'proposal', outputPath: 'proposal.md', status: 'done', requires: [] },
@@ -34,3 +35,19 @@ export const applyWith = (done: boolean[]) => ({
 })
 
 export { CHANGE_ROOT }
+
+/** A schema with no `tasks` artifact at all: apply is gated on `tests`. */
+export const customStatus = (states: [string, string, string]) => ({
+  changeName: 'tdd-change',
+  schemaName: 'tdd',
+  changeRoot: `${ROOT}/openspec/changes/tdd-change`,
+  isPlanningComplete: states.every(s => s === 'done'),
+  isComplete: false,
+  applyRequires: ['tests'],
+  nextSteps: [],
+  artifacts: [
+    { id: 'spec', outputPath: 'spec.md', status: states[0], requires: [] },
+    { id: 'tests', outputPath: 'tests/**/*.md', status: states[1], requires: ['spec'] },
+    { id: 'notes', outputPath: 'notes.md', status: states[2], requires: ['spec'] },
+  ],
+})

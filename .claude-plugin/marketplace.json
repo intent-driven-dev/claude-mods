@@ -1,18 +1,25 @@
 {
   "name": "claude-mods",
-  "owner": { "name": "intent-driven-dev", "url": "https://github.com/intent-driven-dev" },
+  "owner": {
+    "name": "intent-driven-dev",
+    "url": "https://github.com/intent-driven-dev"
+  },
   "metadata": {
     "description": "Claude Code mods: live panes and hooks for everyday workflows",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "openspec-tui",
       "source": "./plugins/openspec-tui",
       "description": "A live side pane showing where you are in an OpenSpec change",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "license": "MIT",
-      "keywords": ["openspec", "sdd", "tui"]
+      "keywords": [
+        "openspec",
+        "sdd",
+        "tui"
+      ]
     }
   ]
 }

@@ -50,9 +50,14 @@ export function parseSchemas(json: Json | undefined, preferred: string | undefin
   return all.find(s => s.name === preferred) ?? all[0]
 }
 
-/** The `schema:` line of `openspec/config.yaml`. */
+/** The `schema:` line of `openspec/config.yaml`, or of a change's `.openspec.yaml`. */
 export function schemaFromConfig(yaml: string): string | undefined {
   return /^schema:\s*["']?([\w.-]+)/m.exec(yaml)?.[1]
+}
+
+/** The artifact ids in order, as one line: `proposal → specs → design → tasks`. */
+export function schemaFlow(artifacts: readonly string[]): string {
+  return artifacts.join(' → ')
 }
 
 /** `openspec list --json` */
@@ -103,6 +108,9 @@ export function parseActive(
     artifacts,
     isPlanningComplete: status?.isPlanningComplete === true,
     isComplete: status?.isComplete === true,
+    applyRequires: Array.isArray(status?.applyRequires)
+      ? status.applyRequires.map(String)
+      : artifacts.slice(-1).map(a => a.id),
     tasks,
     progress: {
       total: Number(progress.total ?? tasks.length),
@@ -147,9 +155,12 @@ export function derivePhase(
   const isAboutThis = activity.hintedChange === undefined || activity.hintedChange === active.name
   if (isAboutThis && isFinishing) return 'archive'
   if (isAboutThis && verb === 'verify') return 'verify'
-  const tasksArtifact = active.artifacts.find(a => a.id === 'tasks')
+  // Planning lasts until the artifacts the schema gates apply on are written.
+  const isGateOpen = active.applyRequires.every(
+    id => active.artifacts.find(a => a.id === id)?.status === 'done',
+  )
   const { total, complete } = active.progress
-  if (tasksArtifact && tasksArtifact.status !== 'done') return 'plan'
+  if (!isGateOpen) return 'plan'
   if (total === 0) return active.isPlanningComplete ? 'apply' : 'plan'
   if (complete < total) return 'apply'
   return 'verify'

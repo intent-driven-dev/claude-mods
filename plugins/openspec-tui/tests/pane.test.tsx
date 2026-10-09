@@ -26,6 +26,13 @@ test('the pane marks the task being worked on', async ($, on) => {
     if (sub === 'status') return out(statusWith('done'))
     return out(applyWith([true, false, false]))
   })
+  on('fs.read', ($, e) => {
+    const path = String(e.path)
+    if (path.endsWith('/openspec/config.yaml')) return { value: 'schema: spec-driven\n' }
+    if (path.endsWith('/fix-login/.openspec.yaml')) return { value: 'schema: tdd\n' }
+    if (path.endsWith('/.openspec.yaml')) return { value: 'schema: spec-driven\n' }
+    return { deny: 'no such file' }
+  })
   await $.command.run({
     command: 'openspec-tui',
     args: '',
@@ -65,7 +72,10 @@ test('the pane marks the task being worked on', async ($, on) => {
     expect(await ui.find({ type: 'Text', text: /▸ add-dark-mode\s+·\s+Apply/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Active changes \(2\)/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /fix-login/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /◔ Propose/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /◔ Propose\s+\[tdd\]/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Schema: spec-driven/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /proposal → specs → design → tasks/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /project default/ })).toBeUndefined()
     await ui.unmount()
   }
 })

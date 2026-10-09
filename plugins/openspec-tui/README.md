@@ -4,7 +4,8 @@ A live side pane for [OpenSpec](https://github.com/Fission-AI/OpenSpec) inside C
 
 ```
 OpenSpec · add-dark-mode
-schema: spec-driven
+Schema: spec-driven
+  proposal → specs → design → tasks
 ────────────────────────────────────────
 ✓ New / Explore
 ✓ Propose  4/4
@@ -31,13 +32,14 @@ Working on
 Active changes (3)
   ▸ add-dark-mode  ◑ Apply
     fix-login      ◔ Propose
-    tidy-docs      ● Sync & Archive (ready)
+    tidy-docs      ● Sync & Archive (ready)  [tdd]
   /openspec-tui <name> to follow another
 ```
 
 ## What it shows
 
 - **The journey.** It starts with **New / Explore**, because exploring is optional and `/opsx:new` alone counts. Then comes **Propose**, then **Apply**, then **Verify**, and it ends with **Sync & Archive**, because `/opsx:sync` is optional before `/opsx:archive`.
+- **The active schema.** The header names the followed change's schema and its artifact flow. A change can use a schema other than the project default (its `.openspec.yaml` says which); then the header adds `(project default: …)`, and in Active changes that change gets a `[schema]` tag. Nothing is hardcoded: the steps, the order, and which artifacts must be done before Apply (the schema's `applyRequires`) all come from the CLI.
 - **Propose, split by your schema.** Each artifact the change's schema defines is a sub-step under Propose, in the schema's own order. The default `spec-driven` schema gives proposal, specs, design and tasks. Each artifact shows one of these marks:
   - `✓`: written.
   - `✎ writing…`: Claude is writing it now.

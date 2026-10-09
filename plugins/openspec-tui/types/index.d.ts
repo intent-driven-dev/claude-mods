@@ -15,6 +15,8 @@ export type OpenSpecChangeSummary = {
   completedTasks: number
   totalTasks: number
   status: string
+  /** From the change's `.openspec.yaml`; each change may use its own schema. */
+  schemaName?: string
 }
 
 export type OpenSpecActiveChange = {
@@ -24,6 +26,8 @@ export type OpenSpecActiveChange = {
   artifacts: OpenSpecArtifact[]
   isPlanningComplete: boolean
   isComplete: boolean
+  /** The artifacts the schema says must be done before apply (`applyRequires`). */
+  applyRequires: string[]
   tasks: OpenSpecTask[]
   progress: { total: number; complete: number }
   applyState?: string
@@ -36,6 +40,8 @@ export type OpenSpecSnapshot = {
   active?: OpenSpecActiveChange
   /** The project's schema, for drawing the steps before any change exists. */
   schema?: OpenSpecSchema
+  /** The project's default schema, from `openspec/config.yaml`. */
+  defaultSchema?: string
   error?: string
   refreshedAt: number
 }

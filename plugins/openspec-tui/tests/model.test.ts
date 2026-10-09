@@ -12,12 +12,13 @@ import {
   parseJson,
   parseList,
   parseSchemas,
+  schemaFlow,
   schemaFromConfig,
   skillVerb,
   statusLine,
   taskWindow,
 } from '../hooks/model'
-import { CHANGE_ROOT, LIST, NO_ROOT, applyWith, statusWith } from './fixtures'
+import { CHANGE_ROOT, LIST, NO_ROOT, applyWith, customStatus, statusWith } from './fixtures'
 
 describe('parsing the CLI', () => {
   test('no root means no OpenSpec project', async () => {
@@ -166,4 +167,27 @@ describe('every active change has a stage', () => {
   test('tasks open is Apply with a count', async () => expect(at(3, 7)).toEqual({ label: 'Apply 3/7', rank: 1 }))
   test('all done is ready to sync and archive', async () =>
     expect(at(7, 7)).toEqual({ label: 'Sync & Archive (ready)', rank: 2 }))
+})
+
+describe('a custom schema with no tasks artifact', () => {
+  test('its own artifacts are the sub-steps of Propose, in its order', async () => {
+    const active = parseActive('tdd-change', customStatus(['done', 'ready', 'ready']), applyWith([]))
+    const steps = buildSteps(active, {}, undefined)
+    expect(steps.filter(s => s.kind === 'artifact').map(s => s.id)).toEqual(['spec', 'tests', 'notes'])
+    expect(active.schemaName).toBe('tdd')
+    expect(derivePhase(active, {})).toBe('plan')
+  })
+  test('apply opens once the gating artifact is done, even with an optional one left', async () => {
+    const active = parseActive('tdd-change', customStatus(['done', 'done', 'ready']), applyWith([false, false]))
+    expect(active.applyRequires).toEqual(['tests'])
+    expect(derivePhase(active, {})).toBe('apply')
+  })
+  test('without applyRequires, the last artifact gates apply', async () => {
+    const { applyRequires: _, ...status } = customStatus(['done', 'done', 'ready'])
+    expect(parseActive('tdd-change', status, applyWith([])).applyRequires).toEqual(['notes'])
+  })
+  test('a change file names its schema; the flow reads in order', async () => {
+    expect(schemaFromConfig('schema: tdd\ncreated: 2026-10-08\n')).toBe('tdd')
+    expect(schemaFlow(['spec', 'tests', 'notes'])).toBe('spec → tests → notes')
+  })
 })
