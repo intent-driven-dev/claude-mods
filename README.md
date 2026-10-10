@@ -8,6 +8,8 @@ Open-source mods for [Claude Code](https://claude.com/claude-code): live panes, 
 | --- | --- |
 | [openspec-tui](plugins/openspec-tui) | A live side pane for OpenSpec: the change's journey (New / Explore → Propose, split into the schema's artifacts → Apply → Verify → Sync & Archive), the task being worked on, and the stage of every active change |
 
+![openspec-tui pane next to a Claude Code session: the followed change add-user-registration is in Propose with 0/5 artifacts, Proposal is next, and a second change is ready to sync and archive](docs/images/openspec-tui.png)
+
 ## Install
 
 > While the repository is private, installing needs GitHub access to it: your `gh` or git credentials must be able to read `intent-driven-dev/claude-mods`.
