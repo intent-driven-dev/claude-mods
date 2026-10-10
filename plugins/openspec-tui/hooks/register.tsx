@@ -28,9 +28,9 @@ import {
   stepForSkill,
   taskWindow,
 } from './model'
+import { type Tone, kit } from './ui'
 
 const PANE = 'openspec-tui'
-const SKILLS_PANE = 'openspec-skills'
 const COMMAND = 'openspec-tui'
 const TICK_MS = 400
 const POLL_MS = 10000
@@ -39,6 +39,7 @@ const snapshot = atom({ plugin: 'openspec-tui', key: 'snapshot' } as const, null
 const pinned = atom({ plugin: 'openspec-tui', key: 'pinned' } as const, null)
 const activity = atom({ plugin: 'openspec-tui', key: 'activity' } as const, {})
 const skillUses = atom({ plugin: 'openspec-tui', key: 'skillUses' } as const, [])
+const view = atom({ plugin: 'openspec-tui', key: 'view' } as const, 'journey')
 
 const NEXT_HINT: Record<string, string> = {
   explore: '/opsx:new to start (or /opsx:explore first, or /opsx:propose for everything at once)',
@@ -182,7 +183,6 @@ export const register: Register = on => {
       description:
         'Show the OpenSpec pane. Args: <change> to pin one, auto to follow the latest, skills for the Skills tab',
     })
-    void $.ui.open({ id: SKILLS_PANE, title: 'Skills' })
     void $.ui.open({ id: PANE, title: 'OpenSpec' })
     isDirty = true
     $.clock.every(TICK_MS, () => void tick($))
@@ -194,9 +194,11 @@ export const register: Register = on => {
   on('command.run', { command: COMMAND }, async ($, e) => {
     const arg = e.args.trim()
     if (arg === 'skills') {
-      await $.ui.open({ id: SKILLS_PANE, title: 'Skills' })
+      await update($, view, () => 'skills')
+      await $.ui.open({ id: PANE, title: 'OpenSpec' })
       return { text: 'Skills tab opened.' }
     }
+    await update($, view, () => 'journey')
     if (arg === 'auto') {
       await update($, pinned, () => null)
     } else if (arg !== '') {
@@ -278,264 +280,209 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
-    const snap = await read($, snapshot)
-    const act = await read($, activity)
+    const els = $.ui.resolve(e)
+    const { Box } = els
     const width = Math.max(20, e.props.bodyColumns)
-
-    if (snap === null) {
-      return <Text dimColor>Reading OpenSpec…</Text>
-    }
-    if (!snap.hasRoot) {
-      return (
-        <Box flexDirection="column">
-          <Text bold>OpenSpec</Text>
-          <Text dimColor>No openspec/ folder here.</Text>
-          {snap.error !== undefined && <Text color="error">{snap.error}</Text>}
-        </Box>
-      )
-    }
-
-    const active = snap.active
-    const phase = derivePhase(active, act)
-    const steps = buildSteps(active, act, snap.schema)
-    const pin = await read($, pinned)
-    const tasks = active?.tasks ?? []
-    const current = currentTaskIndex(tasks)
-    const used = 5 + steps.length + 4 + 5 + 2 + snap.changes.length
-    const room = Math.max(5, (e.props.scroll.bodyRows ?? 24) - used)
-    const win = taskWindow(tasks, room)
-    const schemaName = active?.schemaName || snap.schema?.name
-    const flow = schemaFlow(active ? active.artifacts.map(a => a.id) : (snap.schema?.artifacts ?? []))
-    const isOffDefault =
-      schemaName !== undefined && snap.defaultSchema !== undefined && schemaName !== snap.defaultSchema
-    const rule = <Text dimColor>{'─'.repeat(Math.min(width, 48))}</Text>
-    const why = !active
-      ? undefined
-      : pin === active.name
-        ? `pinned · /${COMMAND} auto to unpin`
-        : act.hintedChange === active.name
-          ? 'from your last OpenSpec command or edit'
-          : 'most recently changed'
-    const nameWidth = Math.min(
-      Math.max(...snap.changes.map(c => c.name.length), 4),
-      Math.max(8, width - 26),
-    )
-    const live = liveStep(steps)
-
-    const mark = (s: Step) =>
-      ({ done: '✓', current: '●', writing: '✎', ready: '○', blocked: '·', pending: '○' })[s.state]
-    const color = (s: Step) =>
-      s.state === 'done'
-        ? 'success'
-        : s.state === 'current'
-          ? 'claude'
-          : s.state === 'writing'
-            ? 'warning'
-            : undefined
-
+    const ui = kit(els, width)
+    const shown = await read($, view)
+    const body =
+      shown === 'skills' ? await renderSkills($, ui) : await renderJourney($, ui, width, e.props.scroll.bodyRows)
     return (
       <Box flexDirection="column">
-        <Text bold wrap="truncate-end">
-          OpenSpec{active ? ` · ${active.name}` : ''}
-        </Text>
-        {schemaName && (
-          <Box flexDirection="row">
-            <Text>Schema: </Text>
-            <Text bold>{schemaName}</Text>
-            {isOffDefault && <Text dimColor>{`  (project default: ${snap.defaultSchema})`}</Text>}
-          </Box>
-        )}
-        {flow !== '' && (
-          <Text dimColor wrap="wrap">
-            {'  '}
-            {flow}
-          </Text>
-        )}
-        {rule}
+        {ui.tabs(shown, next => update($, view, () => next))}
+        {body}
+      </Box>
+    )
+  })
+}
 
-        {steps.map(s => {
-          const isLive = s.state === 'current' || s.state === 'writing'
-          const line = (
-            <Text
-              wrap="truncate-end"
-              bold={isLive}
-              color={color(s)}
-              dimColor={!isLive && s.state !== 'done' && s.state !== 'ready'}
-            >
-              {mark(s)} {s.label}
-              {s.note ? `  ${s.note}` : ''}
-            </Text>
-          )
-          if (s.kind === 'artifact') {
-            // A sub-step of Propose, drawn as a branch of its tree.
-            return (
-              <Box flexDirection="row">
-                <Text dimColor>{s.isLastChild ? '  └─ ' : '  ├─ '}</Text>
-                {line}
-              </Box>
-            )
-          }
-          return (
-            <Box flexDirection="column">
-              {line}
+type Kit = ReturnType<typeof kit>
 
-              {s.id === 'apply' && s.kind === 'phase' && tasks.length > 0 && (
-                <Box flexDirection="column">
-                  <Text dimColor>
-                    {'    '}
-                    {progressBar(active?.progress.complete ?? 0, active?.progress.total ?? 0, Math.min(24, width - 6))}
-                  </Text>
-                  {win.start > 0 && <Text dimColor>{'    '}… {win.start} done above</Text>}
-                  {tasks.slice(win.start, win.end).map((t, j) => {
-                    const isCurrent = win.start + j === current && phase === 'apply'
-                    return (
-                      <Text
-                        wrap="truncate-end"
-                        bold={isCurrent}
-                        color={isCurrent ? 'claude' : t.done ? 'success' : undefined}
-                        dimColor={!isCurrent}
-                      >
-                        {'    '}
-                        {isCurrent ? '▶' : t.done ? '✓' : '○'} {t.description}
-                      </Text>
-                    )
-                  })}
-                  {win.end < tasks.length && (
-                    <Text dimColor>
-                      {'    '}… {tasks.length - win.end} more
-                    </Text>
-                  )}
-                </Box>
-              )}
-            </Box>
-          )
-        })}
+/** The OpenSpec tab: where the followed change is in its journey. */
+async function renderJourney($: EngineInterface, ui: Kit, width: number, bodyRows: number | undefined) {
+  const { tone, rule, Box } = ui
+  const snap = await read($, snapshot)
+  const act = await read($, activity)
 
-        {rule}
-        {active?.applyState === 'blocked' && phase === 'apply' && (
-          <Text color="warning">Apply is blocked: missing artifacts</Text>
-        )}
-        <Text dimColor wrap="wrap">
-          Next: {NEXT_HINT[phase]}
-        </Text>
+  if (snap === null) {
+    return tone('meta', 'Reading OpenSpec…')
+  }
+  if (!snap.hasRoot) {
+    return (
+      <Box flexDirection="column">
+        {tone('title', 'OpenSpec')}
+        {tone('meta', 'No openspec/ folder here.')}
+        {snap.error !== undefined && tone('error', snap.error)}
+      </Box>
+    )
+  }
 
-        {rule}
-        <Text bold>Working on</Text>
-        {active ? (
-          <Box flexDirection="column">
-            <Text color="claude" bold wrap="truncate-end">
-              {'  ▸ '}
-              {active.name}
-              {live ? `  ·  ${live.state === 'writing' ? 'writing ' : ''}${live.label}` : ''}
-            </Text>
-            {why && <Text dimColor>{'    '}{why}</Text>}
-            {act.skill !== undefined && <Text dimColor>{'    '}last command: /{act.skill}</Text>}
-          </Box>
-        ) : (
-          <Text dimColor>{'  '}No active change yet</Text>
-        )}
+  const active = snap.active
+  const phase = derivePhase(active, act)
+  const steps = buildSteps(active, act, snap.schema)
+  const pin = await read($, pinned)
+  const tasks = active?.tasks ?? []
+  const current = currentTaskIndex(tasks)
+  // The tab row, then the rows drawn around the task list.
+  const used = 1 + 5 + steps.length + 4 + 5 + 2 + snap.changes.length
+  const room = Math.max(5, (bodyRows ?? 24) - used)
+  const win = taskWindow(tasks, room)
+  const schemaName = active?.schemaName || snap.schema?.name
+  const flow = schemaFlow(active ? active.artifacts.map(a => a.id) : (snap.schema?.artifacts ?? []))
+  const isOffDefault =
+    schemaName !== undefined && snap.defaultSchema !== undefined && schemaName !== snap.defaultSchema
+  const why = !active
+    ? undefined
+    : pin === active.name
+      ? `pinned · /${COMMAND} auto to unpin`
+      : act.hintedChange === active.name
+        ? 'from your last OpenSpec command or edit'
+        : 'most recently changed'
+  const nameWidth = Math.min(
+    Math.max(...snap.changes.map(c => c.name.length), 4),
+    Math.max(8, width - 26),
+  )
+  const live = liveStep(steps)
 
-        {rule}
-        <Text bold>Active changes ({snap.changes.length})</Text>
-        {snap.changes.length === 0 && <Text dimColor>{'  '}none</Text>}
-        {snap.changes.map(c => {
-          const isFollowed = c.name === active?.name
-          const stage = changeStage(c)
-          const label = isFollowed ? (live?.label ?? stage.label) : stage.label
-          const meter = ['◔', '◑', '●'][stage.rank]
-          const tag =
-            c.schemaName && c.schemaName !== snap.defaultSchema ? `  [${c.schemaName}]` : ''
-          const name = c.name.length > nameWidth ? c.name.slice(0, nameWidth - 1) + '…' : c.name.padEnd(nameWidth)
+  const mark = (s: Step) =>
+    ({ done: '✓', current: '●', writing: '✎', ready: '○', blocked: '·', pending: '○' })[s.state]
+  const stepTone = (s: Step): Tone =>
+    ({ done: 'done', current: 'current', writing: 'writing', ready: 'body', blocked: 'muted', pending: 'muted' })[
+      s.state
+    ] as Tone
+
+  return (
+    <Box flexDirection="column">
+      {tone('title', `OpenSpec${active ? ` · ${active.name}` : ''}`)}
+      {schemaName && (
+        <Box flexDirection="row">
+          {tone('body', 'Schema: ')}
+          {tone('accent', schemaName)}
+          {isOffDefault && tone('meta', `  (project default: ${snap.defaultSchema})`)}
+        </Box>
+      )}
+      {flow !== '' && tone('meta', `  ${flow}`, 'wrap')}
+      {rule()}
+
+      {steps.map(s => {
+        const line = tone(stepTone(s), `${mark(s)} ${s.label}${s.note ? `  ${s.note}` : ''}`)
+        if (s.kind === 'artifact') {
+          // A sub-step of Propose, drawn as a branch of its tree.
           return (
             <Box flexDirection="row">
-              <Text color={isFollowed ? 'claude' : undefined} bold={isFollowed} dimColor={!isFollowed}>
-                {isFollowed ? '  ▸ ' : '    '}
-                {name}
-                {'  '}
-              </Text>
-              <Text
-                wrap="truncate-end"
-                color={stage.rank === 2 ? 'success' : isFollowed ? 'claude' : undefined}
-                dimColor={!isFollowed && stage.rank !== 2}
-              >
-                {meter} {label}
-                {tag}
-              </Text>
+              {tone('rule', s.isLastChild ? '  └─ ' : '  ├─ ')}
+              {line}
             </Box>
           )
-        })}
-        {snap.changes.length > 1 && (
-          <Text dimColor>
-            {'  '}/{COMMAND} {'<name>'} to follow another
-          </Text>
-        )}
-        {snap.error !== undefined && (
-          <Text color="error" wrap="truncate-end">
-            {snap.error}
-          </Text>
-        )}
-      </Box>
-    )
-  })
-
-  on('ui.render', { component: 'Pane', requestId: SKILLS_PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
-    const snap = await read($, snapshot)
-    const uses = await read($, skillUses)
-    const width = Math.max(20, e.props.bodyColumns)
-    const followed = snap?.active?.name
-    const groups = groupSkillUses(uses, followed)
-    const rule = <Text dimColor>{'─'.repeat(Math.min(width, 48))}</Text>
-    const kind = (isOpenSpec: boolean) => (isOpenSpec ? '◆' : '◇')
-
-    return (
-      <Box flexDirection="column">
-        <Text bold wrap="truncate-end">
-          Skills · {followed ?? NO_CHANGE}
-        </Text>
-        {groups.last ? (
-          <Text dimColor wrap="truncate-end">
-            Last: {groups.last.skill} · {groups.last.change ?? NO_CHANGE} · {groups.last.stepLabel}
-          </Text>
-        ) : (
-          <Text dimColor>No skills used yet this session.</Text>
-        )}
-        {rule}
-
-        {groups.steps.length === 0 && groups.last !== undefined && (
-          <Text dimColor>No skills used for this change yet.</Text>
-        )}
-        {groups.steps.map(g => (
+        }
+        return (
           <Box flexDirection="column">
-            <Text bold wrap="truncate-end">
-              {g.stepLabel}
-            </Text>
-            {g.uses.map(u => (
-              <Text wrap="truncate-end" color={u.isOpenSpec ? 'claude' : undefined}>
-                {'  '}
-                {kind(u.isOpenSpec)} {u.skill}
-                {u.count > 1 ? ` ×${u.count}` : ''}
-              </Text>
-            ))}
-          </Box>
-        ))}
+            {line}
 
-        {groups.others.length > 0 && (
-          <Box flexDirection="column">
-            {rule}
-            <Text bold>Other changes</Text>
-            {groups.others.map(o => (
-              <Text dimColor wrap="truncate-end">
-                {'  '}
-                {o.change} · {o.count} skill {o.count === 1 ? 'use' : 'uses'}
-              </Text>
-            ))}
+            {s.id === 'apply' && s.kind === 'phase' && tasks.length > 0 && (
+              <Box flexDirection="column">
+                {tone(
+                  'meta',
+                  `    ${progressBar(active?.progress.complete ?? 0, active?.progress.total ?? 0, Math.min(24, width - 6))}`,
+                )}
+                {win.start > 0 && tone('meta', `    … ${win.start} done above`)}
+                {tasks.slice(win.start, win.end).map((t, j) => {
+                  const isCurrent = win.start + j === current && phase === 'apply'
+                  return tone(
+                    isCurrent ? 'current' : t.done ? 'done' : 'body',
+                    `    ${isCurrent ? '▶' : t.done ? '✓' : '○'} ${t.description}`,
+                  )
+                })}
+                {win.end < tasks.length && tone('meta', `    … ${tasks.length - win.end} more`)}
+              </Box>
+            )}
           </Box>
-        )}
-        {rule}
-        <Text dimColor>◆ OpenSpec skill   ◇ other skill</Text>
-      </Box>
-    )
-  })
+        )
+      })}
+
+      {rule()}
+      {active?.applyState === 'blocked' && phase === 'apply' && tone('warn', 'Apply is blocked: missing artifacts')}
+      {tone('meta', `Next: ${NEXT_HINT[phase]}`, 'wrap')}
+
+      {rule()}
+      {tone('heading', 'Working on')}
+      {active ? (
+        <Box flexDirection="column">
+          {tone(
+            'current',
+            `  ▸ ${active.name}${live ? `  ·  ${live.state === 'writing' ? 'writing ' : ''}${live.label}` : ''}`,
+          )}
+          {why && tone('meta', `    ${why}`)}
+          {act.skill !== undefined && tone('meta', `    last command: /${act.skill}`)}
+        </Box>
+      ) : (
+        tone('meta', '  No active change yet')
+      )}
+
+      {rule()}
+      {tone('heading', `Active changes (${snap.changes.length})`)}
+      {snap.changes.length === 0 && tone('meta', '  none')}
+      {snap.changes.map(c => {
+        const isFollowed = c.name === active?.name
+        const stage = changeStage(c)
+        const label = isFollowed ? (live?.label ?? stage.label) : stage.label
+        const meter = ['◔', '◑', '●'][stage.rank]
+        const tag = c.schemaName && c.schemaName !== snap.defaultSchema ? `  [${c.schemaName}]` : ''
+        const name = c.name.length > nameWidth ? c.name.slice(0, nameWidth - 1) + '…' : c.name.padEnd(nameWidth)
+        return (
+          <Box flexDirection="row">
+            {tone(isFollowed ? 'current' : 'body', `${isFollowed ? '  ▸ ' : '    '}${name}  `)}
+            {tone(stage.rank === 2 ? 'done' : isFollowed ? 'current' : 'meta', `${meter} ${label}${tag}`)}
+          </Box>
+        )
+      })}
+      {snap.changes.length > 1 && tone('meta', `  /${COMMAND} <name> to follow another`)}
+      {snap.error !== undefined && tone('error', snap.error)}
+    </Box>
+  )
+}
+
+/** The Skills tab: every skill used, filed under the change and step it ran in. */
+async function renderSkills($: EngineInterface, ui: Kit) {
+  const { tone, rule, Box } = ui
+  const snap = await read($, snapshot)
+  const uses = await read($, skillUses)
+  const followed = snap?.active?.name
+  const groups = groupSkillUses(uses, followed)
+  const kind = (isOpenSpec: boolean) => (isOpenSpec ? '◆' : '◇')
+
+  return (
+    <Box flexDirection="column">
+      {tone('title', `Skills · ${followed ?? NO_CHANGE}`)}
+      {groups.last
+        ? tone('meta', `Last: ${groups.last.skill} · ${groups.last.change ?? NO_CHANGE} · ${groups.last.stepLabel}`)
+        : tone('meta', 'No skills used yet this session.')}
+      {rule()}
+
+      {groups.steps.length === 0 && groups.last !== undefined && tone('meta', 'No skills used for this change yet.')}
+      {groups.steps.map(g => (
+        <Box flexDirection="column">
+          {tone('heading', g.stepLabel)}
+          {g.uses.map(u =>
+            tone(
+              'body',
+              `  ${kind(u.isOpenSpec)} ${u.skill}${u.count > 1 ? ` ×${u.count}` : ''}`,
+            ),
+          )}
+        </Box>
+      ))}
+
+      {groups.others.length > 0 && (
+        <Box flexDirection="column">
+          {rule()}
+          {tone('heading', 'Other changes')}
+          {groups.others.map(o =>
+            tone('body', `  ${o.change} · ${o.count} skill ${o.count === 1 ? 'use' : 'uses'}`),
+          )}
+        </Box>
+      )}
+      {rule()}
+      {tone('meta', '◆ OpenSpec skill   ◇ other skill')}
+    </Box>
+  )
 }

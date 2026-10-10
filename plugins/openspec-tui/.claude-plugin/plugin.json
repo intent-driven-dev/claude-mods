@@ -1,6 +1,6 @@
 {
   "name": "openspec-tui",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A live side pane for OpenSpec: where your change is in New/Explore → Propose (each artifact) → Apply → Verify → Sync & Archive, the task being worked on, and every active change's stage",
   "author": { "name": "Hari Krishnan", "url": "https://github.com/harikrishnan83" },
   "homepage": "https://github.com/intent-driven-dev/claude-mods/tree/main/plugins/openspec-tui",

@@ -3,6 +3,7 @@
 A live side pane for [OpenSpec](https://github.com/Fission-AI/OpenSpec) inside Claude Code. It shows where your change is in its journey, which artifact Claude is writing, the task being implemented right now, and where every other active change stands.
 
 ```
+1: [OpenSpec]  2: Skills
 OpenSpec · add-dark-mode
 Schema: spec-driven
   proposal → specs → design → tasks
@@ -53,7 +54,7 @@ Active changes (3)
 
 ## The Skills tab
 
-A second pane, **Skills**, sits as a tab next to OpenSpec. Every skill used in the session is filed under the change being followed and the step it was at when the skill ran. That covers OpenSpec skills and any others, whether you typed them as slash commands or Claude invoked them.
+The pane has two tabs, **OpenSpec** and **Skills**, drawn by the plugin itself. Press `1` or `2` while the pane is focused, or click a tab, to switch. In the **Skills** tab, every skill used in the session is filed under the change being followed and the step it was at when the skill ran. That covers OpenSpec skills and any others, whether you typed them as slash commands or Claude invoked them.
 
 ```
 Skills · add-dark-mode
@@ -102,7 +103,7 @@ Answer `y` to add the marketplace, then pick a scope. The user scope is the defa
 | `/openspec-tui` | Open (or focus) the pane at any width |
 | `/openspec-tui <change>` | Pin the pane to one change |
 | `/openspec-tui auto` | Follow the latest change again |
-| `/openspec-tui skills` | Open (or focus) the Skills tab |
+| `/openspec-tui skills` | Open the pane on the Skills tab |
 
 The pane updates as you work:
 - when an `/opsx:*` or `openspec-*` skill runs (typed by you or invoked by Claude);
@@ -110,6 +111,10 @@ The pane updates as you work:
 - when an `openspec` shell command runs;
 - at the end of every turn;
 - every 10 seconds, to catch edits made outside Claude.
+
+## Design
+
+Every color, weight and glyph follows [DESIGN.md](DESIGN.md), which is built for contrast on light and dark themes. A test enforces it.
 
 ## How it works
 

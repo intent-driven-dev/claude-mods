@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { TONES } from '../hooks/ui'
 import { LIST, applyWith, statusWith } from './fixtures'
 
 const out = (json: unknown) => ({
@@ -131,13 +132,56 @@ test('the Skills tab files each skill under the change and step it ran in', asyn
     await $.tool.call({ tool: 'Skill', skill: 'tdd-intent-driven' })
   }
 
+  await $.command.run({ ...RUN, args: 'skills' })
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await mountOn($, surface, 'openspec-skills')
+    const ui = await mountOn($, surface, 'openspec-tui')
     expect(await ui.find({ type: 'Text', text: /Skills · add-dark-mode/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^Apply$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /◆ opsx:apply$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /◇ tdd-intent-driven ×3/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Last: tdd-intent-driven · add-dark-mode · Apply/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('the pane draws its own tabs, and 1 and 2 switch them', async ($, on) => {
+  world(on)
+  await $.command.run(RUN)
+  const ui = await mountOn($, 'terminal', 'openspec-tui')
+  expect((await ui.find({ key: 'tab-journey' }))?.text).toBe('[OpenSpec]')
+  expect((await ui.find({ key: 'tab-skills' }))?.text).toBe(' Skills ')
+  expect(await ui.find({ type: 'Text', text: /^Working on$/ })).toBeDefined()
+
+  await ui.press({ key: 'tab-skills' })
+  expect((await ui.find({ key: 'tab-skills' }))?.text).toBe('[Skills]')
+  expect(await ui.find({ type: 'Text', text: /Skills · add-dark-mode/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Working on$/ })).toBeUndefined()
+
+  await ui.press({ key: 'tab-journey' })
+  expect(await ui.find({ type: 'Text', text: /^Working on$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+// DESIGN.md: every Text names a tone's theme color, and nothing is drawn dim.
+test('every element follows the design system', async ($, on) => {
+  const { clock } = world(on)
+  await $.command.run(RUN)
+  await $.tool.call({ tool: 'Skill', skill: 'opsx:apply' })
+  await clock.advance(5_000)
+  await $.tool.call({ tool: 'Skill', skill: 'tdd-intent-driven' })
+  const colors = new Set(Object.values(TONES).map(t => t.color))
+
+  for (const tab of ['journey', 'skills'] as const) {
+    const ui = await mountOn($, 'terminal', 'openspec-tui')
+    await ui.press({ key: `tab-${tab}` })
+    const texts = await ui.findAll({ type: 'Text' })
+    expect(texts.length).toBeGreaterThan(5)
+    for (const t of texts) {
+      expect({ text: t.text, color: colors.has(String(t.props.color)) }).toEqual({ text: t.text, color: true })
+    }
+    for (const el of [...texts, ...(await ui.findAll({ type: 'Button' })), ...(await ui.findAll({ type: 'Box' }))]) {
+      expect(el.props.dimColor).toBeUndefined()
+    }
     await ui.unmount()
   }
 })

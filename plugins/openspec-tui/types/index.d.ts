@@ -78,6 +78,8 @@ declare module 'claude-code' {
       pinned: string | null
       activity: OpenSpecActivity
       skillUses: OpenSpecSkillUse[]
+      /** Which tab the pane shows. */
+      view: 'journey' | 'skills'
     }
   }
 }
