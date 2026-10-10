@@ -3,7 +3,6 @@
 A live side pane for [OpenSpec](https://github.com/Fission-AI/OpenSpec) inside Claude Code. It shows where your change is in its journey, which artifact Claude is writing, the task being implemented right now, and where every other active change stands.
 
 ```
-1: [OpenSpec]  2: Skills
 OpenSpec · add-dark-mode
 Schema: spec-driven
   proposal → specs → design → tasks
@@ -52,32 +51,6 @@ Active changes (3)
 - **Active changes.** Lists active changes only (never anything archived). It shows every change under `openspec/changes/` with its stage: `◔ Propose`, `◑ Apply n/m` or `● Sync & Archive (ready)`.
 - **Status line.** Shows something like `OpenSpec: add-dark-mode · Propose › writing Design`. This helps on narrow terminals, where the pane does not dock.
 
-## The Skills tab
-
-The pane has two tabs, **OpenSpec** and **Skills**, drawn by the plugin itself. Press `1` or `2` while the pane is focused, or click a tab, to switch. In the **Skills** tab, every skill used in the session is filed under the change being followed and the step it was at when the skill ran. That covers OpenSpec skills and any others, whether you typed them as slash commands or Claude invoked them.
-
-```
-Skills · add-dark-mode
-Last: tdd-intent-driven · add-dark-mode · Apply
-────────────────────────────────────────
-New / Explore
-  ◆ opsx:new
-Propose › Design
-  ◆ opsx:continue ×2
-Apply
-  ◆ opsx:apply
-  ◇ tdd-intent-driven ×3
-────────────────────────────────────────
-Other changes
-  fix-login · 4 skill uses
-────────────────────────────────────────
-◆ OpenSpec skill   ◇ other skill
-```
-
-- **Steps:** they appear in the order you first reached them. While an artifact is being written or is next, the step is `Propose › <artifact>`.
-- **Other changes:** each one collapses to a single line with its skill count.
-- **Lifetime:** uses are kept for the session and survive the mod reloading. They are not kept across sessions.
-
 ## Requirements
 
 - A Claude Code build with plugin function hooks (mods). It was built and tested on 2.1.294 and 2.1.295.
@@ -103,7 +76,6 @@ Answer `y` to add the marketplace, then pick a scope. The user scope is the defa
 | `/openspec-tui` | Open (or focus) the pane at any width |
 | `/openspec-tui <change>` | Pin the pane to one change |
 | `/openspec-tui auto` | Follow the latest change again |
-| `/openspec-tui skills` | Open the pane on the Skills tab |
 
 The pane updates as you work:
 - when an `/opsx:*` or `openspec-*` skill runs (typed by you or invoked by Claude);

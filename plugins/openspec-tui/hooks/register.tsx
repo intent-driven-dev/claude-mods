@@ -4,7 +4,6 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { OpenSpecActivity, OpenSpecSchema, OpenSpecSnapshot } from '../types'
 import {
   type Step,
-  NO_CHANGE,
   artifactForPath,
   buildSteps,
   changeFromPath,
@@ -12,7 +11,6 @@ import {
   chooseActive,
   currentTaskIndex,
   derivePhase,
-  groupSkillUses,
   isOpenSpecSkill,
   liveStep,
   parseActive,
@@ -20,12 +18,9 @@ import {
   parseList,
   parseSchemas,
   progressBar,
-  recordSkillUse,
   schemaFlow,
   schemaFromConfig,
-  skillVerb,
   statusLine,
-  stepForSkill,
   taskWindow,
 } from './model'
 import { type Tone, kit } from './ui'
@@ -38,8 +33,6 @@ const POLL_MS = 10000
 const snapshot = atom({ plugin: 'openspec-tui', key: 'snapshot' } as const, null)
 const pinned = atom({ plugin: 'openspec-tui', key: 'pinned' } as const, null)
 const activity = atom({ plugin: 'openspec-tui', key: 'activity' } as const, {})
-const skillUses = atom({ plugin: 'openspec-tui', key: 'skillUses' } as const, [])
-const view = atom({ plugin: 'openspec-tui', key: 'view' } as const, 'journey')
 
 const NEXT_HINT: Record<string, string> = {
   explore: '/opsx:new to start (or /opsx:explore first, or /opsx:propose for everything at once)',
@@ -155,33 +148,11 @@ function changeFromArgs(args: string | undefined): string | undefined {
   return first && /^[a-z0-9][a-z0-9-]*$/.test(first) ? first : undefined
 }
 
-/** Files one skill use under the change followed and the step it is at now. */
-async function noteSkill($: EngineInterface, skill: string) {
-  const snap = await read($, snapshot)
-  const act = await read($, activity)
-  const verb = skillVerb(skill)
-  const hinted = act.hintedChange
-  const isStarting = verb === 'new' || verb === 'propose' || verb === 'explore'
-  // Starting a change that `openspec list` has not shown yet belongs to that
-  // change's first step, not to whichever change the pane followed before.
-  const isNewChange = isStarting && hinted !== undefined && !snap?.changes.some(c => c.name === hinted)
-  const where = isNewChange
-    ? { change: hinted, stepId: 'explore', stepLabel: 'New / Explore' }
-    : snap?.active
-      ? { change: snap.active.name, ...stepForSkill(buildSteps(snap.active, act, snap.schema)) }
-      : { change: undefined, stepId: 'explore', stepLabel: 'New / Explore' }
-  const at = await $.clock.now()
-  const list = await read($, skillUses)
-  if (recordSkillUse(list, { skill, at, ...where }) === undefined) return
-  await update($, skillUses, prev => recordSkillUse(prev, { skill, at, ...where }) ?? prev)
-}
-
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: COMMAND,
-      description:
-        'Show the OpenSpec pane. Args: <change> to pin one, auto to follow the latest, skills for the Skills tab',
+      description: 'Show the OpenSpec pane. Args: <change> to pin one, auto to follow the latest',
     })
     void $.ui.open({ id: PANE, title: 'OpenSpec' })
     isDirty = true
@@ -193,12 +164,6 @@ export const register: Register = on => {
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     const arg = e.args.trim()
-    if (arg === 'skills') {
-      await update($, view, () => 'skills')
-      await $.ui.open({ id: PANE, title: 'OpenSpec' })
-      return { text: 'Skills tab opened.' }
-    }
-    await update($, view, () => 'journey')
     if (arg === 'auto') {
       await update($, pinned, () => null)
     } else if (arg !== '') {
@@ -228,23 +193,14 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Every skill expansion: a typed /name, the Skill tool, a preload.
-  on('skill.prompt', async ($, e, next) => {
-    await noteSkill($, e.skill)
-    return next(e)
-  })
-
   on('tool.call', async ($, e, next) => {
-    if (e.tool === 'Skill') {
-      // The model invoking a skill itself.
-      if (isOpenSpecSkill(e.skill)) {
-        await setActivity($, {
-          skill: e.skill,
-          hintedChange: changeFromArgs(e.args) ?? (await read($, activity)).hintedChange,
-        })
-        requestRefresh()
-      }
-      await noteSkill($, e.skill)
+    // The model invoking an OpenSpec skill itself.
+    if (e.tool === 'Skill' && isOpenSpecSkill(e.skill)) {
+      await setActivity($, {
+        skill: e.skill,
+        hintedChange: changeFromArgs(e.args) ?? (await read($, activity)).hintedChange,
+      })
+      requestRefresh()
       return next(e)
     }
 
@@ -284,21 +240,13 @@ export const register: Register = on => {
     const { Box } = els
     const width = Math.max(20, e.props.bodyColumns)
     const ui = kit(els, width)
-    const shown = await read($, view)
-    const body =
-      shown === 'skills' ? await renderSkills($, ui) : await renderJourney($, ui, width, e.props.scroll.bodyRows)
-    return (
-      <Box flexDirection="column">
-        {ui.tabs(shown, next => update($, view, () => next))}
-        {body}
-      </Box>
-    )
+    return <Box flexDirection="column">{await renderJourney($, ui, width, e.props.scroll.bodyRows)}</Box>
   })
 }
 
 type Kit = ReturnType<typeof kit>
 
-/** The OpenSpec tab: where the followed change is in its journey. */
+/** Where the followed change is in its journey. */
 async function renderJourney($: EngineInterface, ui: Kit, width: number, bodyRows: number | undefined) {
   const { tone, rule, Box } = ui
   const snap = await read($, snapshot)
@@ -323,8 +271,8 @@ async function renderJourney($: EngineInterface, ui: Kit, width: number, bodyRow
   const pin = await read($, pinned)
   const tasks = active?.tasks ?? []
   const current = currentTaskIndex(tasks)
-  // The tab row, then the rows drawn around the task list.
-  const used = 1 + 5 + steps.length + 4 + 5 + 2 + snap.changes.length
+  // The rows drawn around the task list.
+  const used = 5 + steps.length + 4 + 5 + 2 + snap.changes.length
   const room = Math.max(5, (bodyRows ?? 24) - used)
   const win = taskWindow(tasks, room)
   const schemaName = active?.schemaName || snap.schema?.name
@@ -438,51 +386,6 @@ async function renderJourney($: EngineInterface, ui: Kit, width: number, bodyRow
       })}
       {snap.changes.length > 1 && tone('meta', `  /${COMMAND} <name> to follow another`)}
       {snap.error !== undefined && tone('error', snap.error)}
-    </Box>
-  )
-}
-
-/** The Skills tab: every skill used, filed under the change and step it ran in. */
-async function renderSkills($: EngineInterface, ui: Kit) {
-  const { tone, rule, Box } = ui
-  const snap = await read($, snapshot)
-  const uses = await read($, skillUses)
-  const followed = snap?.active?.name
-  const groups = groupSkillUses(uses, followed)
-  const kind = (isOpenSpec: boolean) => (isOpenSpec ? '◆' : '◇')
-
-  return (
-    <Box flexDirection="column">
-      {tone('title', `Skills · ${followed ?? NO_CHANGE}`)}
-      {groups.last
-        ? tone('meta', `Last: ${groups.last.skill} · ${groups.last.change ?? NO_CHANGE} · ${groups.last.stepLabel}`)
-        : tone('meta', 'No skills used yet this session.')}
-      {rule()}
-
-      {groups.steps.length === 0 && groups.last !== undefined && tone('meta', 'No skills used for this change yet.')}
-      {groups.steps.map(g => (
-        <Box flexDirection="column">
-          {tone('heading', g.stepLabel)}
-          {g.uses.map(u =>
-            tone(
-              'body',
-              `  ${kind(u.isOpenSpec)} ${u.skill}${u.count > 1 ? ` ×${u.count}` : ''}`,
-            ),
-          )}
-        </Box>
-      ))}
-
-      {groups.others.length > 0 && (
-        <Box flexDirection="column">
-          {rule()}
-          {tone('heading', 'Other changes')}
-          {groups.others.map(o =>
-            tone('body', `  ${o.change} · ${o.count} skill ${o.count === 1 ? 'use' : 'uses'}`),
-          )}
-        </Box>
-      )}
-      {rule()}
-      {tone('meta', '◆ OpenSpec skill   ◇ other skill')}
     </Box>
   )
 }
