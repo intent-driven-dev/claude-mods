@@ -10,15 +10,48 @@ Open-source mods for [Claude Code](https://claude.com/claude-code): live panes, 
 
 ## Install
 
-At the prompt of a Claude Code terminal session:
-
-```
-/plugin install openspec-tui --marketplace intent-driven-dev/claude-mods
-```
-
 > While the repository is private, installing needs GitHub access to it: your `gh` or git credentials must be able to read `intent-driven-dev/claude-mods`.
 
-Answer `y` to add the marketplace, then choose a scope.
+### 1. Add the marketplace
+
+Do this once. At the prompt of a Claude Code session:
+
+```
+/plugin marketplace add intent-driven-dev/claude-mods
+```
+
+or from your shell:
+
+```sh
+claude plugin marketplace add intent-driven-dev/claude-mods
+```
+
+This registers the marketplace under the name `claude-mods`.
+
+### 2. Install a mod
+
+```
+/plugin install openspec-tui@claude-mods
+```
+
+or from your shell:
+
+```sh
+claude plugin install openspec-tui@claude-mods
+```
+
+Choose a scope when asked (`user`, `project` or `local`), then restart Claude Code to load the mod.
+
+## Upgrade
+
+First refresh the marketplace so Claude Code sees the latest versions, then update the mod:
+
+```sh
+claude plugin marketplace update claude-mods
+claude plugin update openspec-tui@claude-mods
+```
+
+Restart Claude Code to apply the update. `claude plugin list` shows the version you have installed.
 
 ## Layout
 
