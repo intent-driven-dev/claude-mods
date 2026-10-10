@@ -8,14 +8,17 @@ import {
   chooseActive,
   currentTaskIndex,
   derivePhase,
+  groupSkillUses,
   parseActive,
   parseJson,
   parseList,
   parseSchemas,
+  recordSkillUse,
   schemaFlow,
   schemaFromConfig,
   skillVerb,
   statusLine,
+  stepForSkill,
   taskWindow,
 } from '../hooks/model'
 import { CHANGE_ROOT, LIST, NO_ROOT, applyWith, customStatus, statusWith } from './fixtures'
@@ -189,5 +192,68 @@ describe('a custom schema with no tasks artifact', () => {
   test('a change file names its schema; the flow reads in order', async () => {
     expect(schemaFromConfig('schema: tdd\ncreated: 2026-10-08\n')).toBe('tdd')
     expect(schemaFlow(['spec', 'tests', 'notes'])).toBe('spec → tests → notes')
+  })
+})
+
+describe('only active changes', () => {
+  test('the archive folder and archived entries never list', async () => {
+    const json = {
+      ...LIST,
+      changes: [
+        ...LIST.changes,
+        { name: 'archive', completedTasks: 0, totalTasks: 0, status: 'no-tasks' },
+        { name: '2026-10-01-old', completedTasks: 2, totalTasks: 2, status: 'archived' },
+      ],
+    }
+    expect(parseList(json).changes.map(c => c.name)).toEqual(['add-dark-mode', 'fix-login'])
+  })
+  test('a change with every task done is still active (ready to archive)', async () => {
+    const json = { ...LIST, changes: [{ name: 'done-one', completedTasks: 2, totalTasks: 2, status: 'complete' }] }
+    expect(parseList(json).changes.map(c => c.name)).toEqual(['done-one'])
+  })
+})
+
+describe('skill uses', () => {
+  // null stands for "no change" (a default parameter would swallow undefined).
+  const at = (skill: string, t: number, stepId = 'apply', change: string | null = 'add-dark-mode') => ({
+    skill,
+    at: t,
+    change: change ?? undefined,
+    stepId,
+    stepLabel: stepId === 'apply' ? 'Apply' : 'Propose › Design',
+  })
+
+  test('the same skill at the same step counts up', async () => {
+    let list = recordSkillUse([], at('tdd-intent-driven', 0))!
+    list = recordSkillUse(list, at('tdd-intent-driven', 10_000))!
+    expect(list).toHaveLength(1)
+    expect(list[0]?.count).toBe(2)
+    expect(list[0]?.isOpenSpec).toBe(false)
+  })
+  test('one use reported twice within the window is counted once', async () => {
+    const list = recordSkillUse([], at('opsx:apply', 0))!
+    expect(recordSkillUse(list, at('opsx:apply', 1_000))).toBeUndefined()
+  })
+  test('steps group in the order first reached; other changes collapse', async () => {
+    let list = recordSkillUse([], at('opsx:continue', 0, 'plan/design'))!
+    list = recordSkillUse(list, at('opsx:apply', 5_000))!
+    list = recordSkillUse(list, at('tdd-intent-driven', 10_000))!
+    list = recordSkillUse(list, at('opsx:explore', 15_000, 'apply', 'fix-login'))!
+    list = recordSkillUse(list, at('find-docs', 20_000, 'apply', null))!
+    const g = groupSkillUses(list, 'add-dark-mode')
+    expect(g.steps.map(s => s.stepLabel)).toEqual(['Propose › Design', 'Apply'])
+    expect(g.steps[1]?.uses.map(u => u.skill)).toEqual(['opsx:apply', 'tdd-intent-driven'])
+    expect(g.others).toEqual([
+      { change: 'fix-login', count: 1 },
+      { change: '(no change)', count: 1 },
+    ])
+    expect(g.last?.skill).toBe('find-docs')
+  })
+  test('a skill used while an artifact is next is filed under Propose › that artifact', async () => {
+    const active = parseActive('add-dark-mode', statusWith('ready'), applyWith([]))
+    expect(stepForSkill(buildSteps(active, {}, undefined))).toEqual({
+      stepId: 'plan/tasks',
+      stepLabel: 'Propose › Tasks',
+    })
   })
 })

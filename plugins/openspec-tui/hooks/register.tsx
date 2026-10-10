@@ -4,6 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { OpenSpecActivity, OpenSpecSchema, OpenSpecSnapshot } from '../types'
 import {
   type Step,
+  NO_CHANGE,
   artifactForPath,
   buildSteps,
   changeFromPath,
@@ -11,25 +12,33 @@ import {
   chooseActive,
   currentTaskIndex,
   derivePhase,
+  groupSkillUses,
   isOpenSpecSkill,
+  liveStep,
   parseActive,
   parseJson,
   parseList,
   parseSchemas,
   progressBar,
+  recordSkillUse,
   schemaFlow,
   schemaFromConfig,
+  skillVerb,
   statusLine,
+  stepForSkill,
   taskWindow,
 } from './model'
 
 const PANE = 'openspec-tui'
+const SKILLS_PANE = 'openspec-skills'
 const COMMAND = 'openspec-tui'
+const TICK_MS = 400
 const POLL_MS = 10000
 
 const snapshot = atom({ plugin: 'openspec-tui', key: 'snapshot' } as const, null)
 const pinned = atom({ plugin: 'openspec-tui', key: 'pinned' } as const, null)
 const activity = atom({ plugin: 'openspec-tui', key: 'activity' } as const, {})
+const skillUses = atom({ plugin: 'openspec-tui', key: 'skillUses' } as const, [])
 
 const NEXT_HINT: Record<string, string> = {
   explore: '/opsx:new to start (or /opsx:explore first, or /opsx:propose for everything at once)',
@@ -39,10 +48,16 @@ const NEXT_HINT: Record<string, string> = {
   archive: '/opsx:sync (optional), then /opsx:archive',
 }
 
+// Refreshing runs on session.start's own `$`, from its timers: a hook only asks
+// for one (requestRefresh), so no work outlives the dispatch that asked.
 let isRefreshing = false
+let isDirty = true
 /** The default schema's artifacts, fetched again only when `config.yaml` names another. */
 let schemaCache: OpenSpecSchema | undefined
-let isDirty = false
+
+function requestRefresh() {
+  isDirty = true
+}
 
 async function openspec($: EngineInterface, args: string[]) {
   const { stdout } = await $.process.run(['openspec', ...args, '--json'], { timeoutMs: 20000 })
@@ -96,11 +111,14 @@ async function refreshOnce($: EngineInterface) {
       refreshedAt: now,
     }
   } catch (err) {
+    // Keep what the last good refresh saw, never more: the followed change
+    // only while that list still has it.
     const prev = await read($, snapshot)
+    const changes = prev?.changes ?? []
     next = {
       hasRoot: prev?.hasRoot ?? false,
-      changes: prev?.changes ?? [],
-      active: prev?.active,
+      changes,
+      active: changes.some(c => c.name === prev?.active?.name) ? prev?.active : undefined,
       schema: prev?.schema,
       defaultSchema: prev?.defaultSchema,
       error: err instanceof Error ? err.message : String(err),
@@ -112,18 +130,15 @@ async function refreshOnce($: EngineInterface) {
   $.ui.status(statusLine(next.active, buildSteps(next.active, act, next.schema)))
 }
 
-/** One refresh at a time; a request made meanwhile runs once more after it. */
-async function refresh($: EngineInterface) {
-  if (isRefreshing) {
-    isDirty = true
-    return
-  }
+/** Runs the refreshes asked for since the last one; never two at once. */
+async function tick($: EngineInterface) {
+  if (!isDirty || isRefreshing) return
   isRefreshing = true
   try {
-    do {
+    while (isDirty) {
       isDirty = false
       await refreshOnce($)
-    } while (isDirty)
+    }
   } finally {
     isRefreshing = false
   }
@@ -139,28 +154,57 @@ function changeFromArgs(args: string | undefined): string | undefined {
   return first && /^[a-z0-9][a-z0-9-]*$/.test(first) ? first : undefined
 }
 
+/** Files one skill use under the change followed and the step it is at now. */
+async function noteSkill($: EngineInterface, skill: string) {
+  const snap = await read($, snapshot)
+  const act = await read($, activity)
+  const verb = skillVerb(skill)
+  const hinted = act.hintedChange
+  const isStarting = verb === 'new' || verb === 'propose' || verb === 'explore'
+  // Starting a change that `openspec list` has not shown yet belongs to that
+  // change's first step, not to whichever change the pane followed before.
+  const isNewChange = isStarting && hinted !== undefined && !snap?.changes.some(c => c.name === hinted)
+  const where = isNewChange
+    ? { change: hinted, stepId: 'explore', stepLabel: 'New / Explore' }
+    : snap?.active
+      ? { change: snap.active.name, ...stepForSkill(buildSteps(snap.active, act, snap.schema)) }
+      : { change: undefined, stepId: 'explore', stepLabel: 'New / Explore' }
+  const at = await $.clock.now()
+  const list = await read($, skillUses)
+  if (recordSkillUse(list, { skill, at, ...where }) === undefined) return
+  await update($, skillUses, prev => recordSkillUse(prev, { skill, at, ...where }) ?? prev)
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: COMMAND,
-      description: 'Show the OpenSpec pane. Args: <change> to pin one, auto to follow the latest',
+      description:
+        'Show the OpenSpec pane. Args: <change> to pin one, auto to follow the latest, skills for the Skills tab',
     })
+    void $.ui.open({ id: SKILLS_PANE, title: 'Skills' })
     void $.ui.open({ id: PANE, title: 'OpenSpec' })
-    void refresh($)
-    $.clock.every(POLL_MS, () => void refresh($))
+    isDirty = true
+    $.clock.every(TICK_MS, () => void tick($))
+    $.clock.every(POLL_MS, requestRefresh)
 
     return next(e)
   })
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     const arg = e.args.trim()
+    if (arg === 'skills') {
+      await $.ui.open({ id: SKILLS_PANE, title: 'Skills' })
+      return { text: 'Skills tab opened.' }
+    }
     if (arg === 'auto') {
       await update($, pinned, () => null)
     } else if (arg !== '') {
       await update($, pinned, () => arg)
     }
     await $.ui.open({ id: PANE, title: 'OpenSpec' })
-    await refresh($)
+    isDirty = true
+    await tick($)
     const snap = await read($, snapshot)
     if (arg !== '' && arg !== 'auto' && !snap?.changes.some(c => c.name === arg)) {
       return { text: `No active change named "${arg}"; following the latest instead.` }
@@ -177,19 +221,28 @@ export const register: Register = on => {
         skill: e.command,
         hintedChange: changeFromArgs(e.args) ?? (await read($, activity)).hintedChange,
       })
-      void refresh($)
+      requestRefresh()
     }
     return next(e)
   })
 
+  // Every skill expansion: a typed /name, the Skill tool, a preload.
+  on('skill.prompt', async ($, e, next) => {
+    await noteSkill($, e.skill)
+    return next(e)
+  })
+
   on('tool.call', async ($, e, next) => {
-    // The model invoking an OpenSpec skill itself.
-    if (e.tool === 'Skill' && isOpenSpecSkill(e.skill)) {
-      await setActivity($, {
-        skill: e.skill,
-        hintedChange: changeFromArgs(e.args) ?? (await read($, activity)).hintedChange,
-      })
-      void refresh($)
+    if (e.tool === 'Skill') {
+      // The model invoking a skill itself.
+      if (isOpenSpecSkill(e.skill)) {
+        await setActivity($, {
+          skill: e.skill,
+          hintedChange: changeFromArgs(e.args) ?? (await read($, activity)).hintedChange,
+        })
+        requestRefresh()
+      }
+      await noteSkill($, e.skill)
       return next(e)
     }
 
@@ -205,13 +258,13 @@ export const register: Register = on => {
         writingArtifact: artifactForPath(path, active),
       })
       const ran = await next(e)
-      void refresh($)
+      requestRefresh()
       return ran
     }
 
     if (e.tool === 'Bash' && /(^|[\s;&|(])openspec\s/.test(e.command)) {
       const ran = await next(e)
-      void refresh($)
+      requestRefresh()
       return ran
     }
 
@@ -220,7 +273,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     await setActivity($, { writingArtifact: undefined })
-    void refresh($)
+    requestRefresh()
     return next(e)
   })
 
@@ -268,10 +321,7 @@ export const register: Register = on => {
       Math.max(...snap.changes.map(c => c.name.length), 4),
       Math.max(8, width - 26),
     )
-    const liveStep =
-      steps.find(s => s.state === 'writing') ??
-      steps.find(s => s.kind === 'artifact' && s.state === 'current') ??
-      steps.find(s => s.state === 'current')
+    const live = liveStep(steps)
 
     const mark = (s: Step) =>
       ({ done: '✓', current: '●', writing: '✎', ready: '○', blocked: '·', pending: '○' })[s.state]
@@ -290,10 +340,11 @@ export const register: Register = on => {
           OpenSpec{active ? ` · ${active.name}` : ''}
         </Text>
         {schemaName && (
-          <Text wrap="truncate-end">
-            <Text bold>Schema: {schemaName}</Text>
-            {isOffDefault && <Text dimColor>  (project default: {snap.defaultSchema})</Text>}
-          </Text>
+          <Box flexDirection="row">
+            <Text>Schema: </Text>
+            <Text bold>{schemaName}</Text>
+            {isOffDefault && <Text dimColor>{`  (project default: ${snap.defaultSchema})`}</Text>}
+          </Box>
         )}
         {flow !== '' && (
           <Text dimColor wrap="wrap">
@@ -376,7 +427,7 @@ export const register: Register = on => {
             <Text color="claude" bold wrap="truncate-end">
               {'  ▸ '}
               {active.name}
-              {liveStep ? `  ·  ${liveStep.state === 'writing' ? 'writing ' : ''}${liveStep.label}` : ''}
+              {live ? `  ·  ${live.state === 'writing' ? 'writing ' : ''}${live.label}` : ''}
             </Text>
             {why && <Text dimColor>{'    '}{why}</Text>}
             {act.skill !== undefined && <Text dimColor>{'    '}last command: /{act.skill}</Text>}
@@ -391,7 +442,7 @@ export const register: Register = on => {
         {snap.changes.map(c => {
           const isFollowed = c.name === active?.name
           const stage = changeStage(c)
-          const label = isFollowed ? (liveStep?.label ?? stage.label) : stage.label
+          const label = isFollowed ? (live?.label ?? stage.label) : stage.label
           const meter = ['◔', '◑', '●'][stage.rank]
           const tag =
             c.schemaName && c.schemaName !== snap.defaultSchema ? `  [${c.schemaName}]` : ''
@@ -424,6 +475,66 @@ export const register: Register = on => {
             {snap.error}
           </Text>
         )}
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: SKILLS_PANE }, async ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+    const snap = await read($, snapshot)
+    const uses = await read($, skillUses)
+    const width = Math.max(20, e.props.bodyColumns)
+    const followed = snap?.active?.name
+    const groups = groupSkillUses(uses, followed)
+    const rule = <Text dimColor>{'─'.repeat(Math.min(width, 48))}</Text>
+    const kind = (isOpenSpec: boolean) => (isOpenSpec ? '◆' : '◇')
+
+    return (
+      <Box flexDirection="column">
+        <Text bold wrap="truncate-end">
+          Skills · {followed ?? NO_CHANGE}
+        </Text>
+        {groups.last ? (
+          <Text dimColor wrap="truncate-end">
+            Last: {groups.last.skill} · {groups.last.change ?? NO_CHANGE} · {groups.last.stepLabel}
+          </Text>
+        ) : (
+          <Text dimColor>No skills used yet this session.</Text>
+        )}
+        {rule}
+
+        {groups.steps.length === 0 && groups.last !== undefined && (
+          <Text dimColor>No skills used for this change yet.</Text>
+        )}
+        {groups.steps.map(g => (
+          <Box flexDirection="column">
+            <Text bold wrap="truncate-end">
+              {g.stepLabel}
+            </Text>
+            {g.uses.map(u => (
+              <Text wrap="truncate-end" color={u.isOpenSpec ? 'claude' : undefined}>
+                {'  '}
+                {kind(u.isOpenSpec)} {u.skill}
+                {u.count > 1 ? ` ×${u.count}` : ''}
+              </Text>
+            ))}
+          </Box>
+        ))}
+
+        {groups.others.length > 0 && (
+          <Box flexDirection="column">
+            {rule}
+            <Text bold>Other changes</Text>
+            {groups.others.map(o => (
+              <Text dimColor wrap="truncate-end">
+                {'  '}
+                {o.change} · {o.count} skill {o.count === 1 ? 'use' : 'uses'}
+              </Text>
+            ))}
+          </Box>
+        )}
+        {rule}
+        <Text dimColor>◆ OpenSpec skill   ◇ other skill</Text>
       </Box>
     )
   })

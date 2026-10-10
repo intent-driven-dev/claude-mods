@@ -48,8 +48,34 @@ Active changes (3)
   - `· needs …`: blocked on other artifacts.
 - **The task in progress.** During Apply, `▶` marks the first unchecked task in `tasks.md`. It moves as Claude ticks the boxes.
 - **Working on.** Shows the change the pane follows and why it picked that one: you pinned it, your last OpenSpec command or edit named it, or it's the most recently changed.
-- **Active changes.** Lists every change under `openspec/changes/` with its stage: `◔ Propose`, `◑ Apply n/m` or `● Sync & Archive (ready)`.
+- **Active changes.** Lists active changes only (never anything archived). It shows every change under `openspec/changes/` with its stage: `◔ Propose`, `◑ Apply n/m` or `● Sync & Archive (ready)`.
 - **Status line.** Shows something like `OpenSpec: add-dark-mode · Propose › writing Design`. This helps on narrow terminals, where the pane does not dock.
+
+## The Skills tab
+
+A second pane, **Skills**, sits as a tab next to OpenSpec. Every skill used in the session is filed under the change being followed and the step it was at when the skill ran. That covers OpenSpec skills and any others, whether you typed them as slash commands or Claude invoked them.
+
+```
+Skills · add-dark-mode
+Last: tdd-intent-driven · add-dark-mode · Apply
+────────────────────────────────────────
+New / Explore
+  ◆ opsx:new
+Propose › Design
+  ◆ opsx:continue ×2
+Apply
+  ◆ opsx:apply
+  ◇ tdd-intent-driven ×3
+────────────────────────────────────────
+Other changes
+  fix-login · 4 skill uses
+────────────────────────────────────────
+◆ OpenSpec skill   ◇ other skill
+```
+
+- **Steps:** they appear in the order you first reached them. While an artifact is being written or is next, the step is `Propose › <artifact>`.
+- **Other changes:** each one collapses to a single line with its skill count.
+- **Lifetime:** uses are kept for the session and survive the mod reloading. They are not kept across sessions.
 
 ## Requirements
 
@@ -76,6 +102,7 @@ Answer `y` to add the marketplace, then pick a scope. The user scope is the defa
 | `/openspec-tui` | Open (or focus) the pane at any width |
 | `/openspec-tui <change>` | Pin the pane to one change |
 | `/openspec-tui auto` | Follow the latest change again |
+| `/openspec-tui skills` | Open (or focus) the Skills tab |
 
 The pane updates as you work:
 - when an `/opsx:*` or `openspec-*` skill runs (typed by you or invoked by Claude);

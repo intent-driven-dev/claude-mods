@@ -55,12 +55,29 @@ export type OpenSpecActivity = {
   writingArtifact?: string
 }
 
+/** One skill used at one step of one change, counted. */
+export type OpenSpecSkillUse = {
+  skill: string
+  /** An `/opsx:*` or `openspec-*` skill. */
+  isOpenSpec: boolean
+  /** The change followed when it ran; undefined when there was none. */
+  change?: string
+  /** `plan/design`, `apply`, ...: what uses are grouped by. */
+  stepId: string
+  /** `Propose › Design`, `Apply`, ...: what the tab shows. */
+  stepLabel: string
+  count: number
+  firstAt: number
+  lastAt: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'openspec-tui': {
       snapshot: OpenSpecSnapshot | null
       pinned: string | null
       activity: OpenSpecActivity
+      skillUses: OpenSpecSkillUse[]
     }
   }
 }

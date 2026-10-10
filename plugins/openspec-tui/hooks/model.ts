@@ -4,6 +4,7 @@ import type {
   OpenSpecArtifact,
   OpenSpecChangeSummary,
   OpenSpecSchema,
+  OpenSpecSkillUse,
   OpenSpecTask,
 } from '../types'
 
@@ -79,7 +80,8 @@ export function parseList(json: Json | undefined): {
   return {
     hasRoot: true,
     rootPath: typeof rootPath === 'string' ? rootPath : undefined,
-    changes: changes.filter(c => c.name !== ''),
+    // Active changes only: never the archive folder or an archived entry, whatever the CLI version.
+    changes: changes.filter(c => c.name !== '' && c.name !== 'archive' && c.status !== 'archived'),
   }
 }
 
@@ -326,16 +328,113 @@ export function buildSteps(
   ]
 }
 
+/** The step happening now: the artifact being written (or next) says more than "Propose" does. */
+export function liveStep(steps: Step[]): Step | undefined {
+  return (
+    steps.find(s => s.state === 'writing') ??
+    steps.find(s => s.kind === 'artifact' && s.state === 'current') ??
+    steps.find(s => s.state === 'current')
+  )
+}
+
+/** Where a skill used now is filed: `plan/design` · `Propose › Design`, or the phase. */
+export function stepForSkill(steps: Step[]): { stepId: string; stepLabel: string } {
+  const now = liveStep(steps)
+  if (!now) return { stepId: 'none', stepLabel: 'No step' }
+  if (now.kind === 'artifact') {
+    return { stepId: `plan/${now.id}`, stepLabel: `${PHASE_LABELS.plan} › ${now.label}` }
+  }
+  return { stepId: now.id, stepLabel: now.label }
+}
+
+export const SKILL_USES_MAX = 300
+export const SKILL_DEDUPE_MS = 3000
+
+export type SkillUseEvent = {
+  skill: string
+  change?: string
+  stepId: string
+  stepLabel: string
+  at: number
+}
+
+/**
+ * Adds one use, counted under its (change, step, skill). The same skill seen
+ * again within `SKILL_DEDUPE_MS` is one use reported twice (the Skill tool
+ * call and its prompt expansion), so it returns undefined: nothing to write.
+ */
+export function recordSkillUse(
+  list: readonly OpenSpecSkillUse[],
+  use: SkillUseEvent,
+): OpenSpecSkillUse[] | undefined {
+  if (list.some(u => u.skill === use.skill && use.at - u.lastAt < SKILL_DEDUPE_MS)) {
+    return undefined
+  }
+  const i = list.findIndex(
+    u => u.skill === use.skill && u.change === use.change && u.stepId === use.stepId,
+  )
+  if (i >= 0) {
+    const prev = list[i]!
+    return list.map((u, j) => (j === i ? { ...prev, count: prev.count + 1, lastAt: use.at } : u))
+  }
+  const added: OpenSpecSkillUse = {
+    skill: use.skill,
+    isOpenSpec: isOpenSpecSkill(use.skill),
+    change: use.change,
+    stepId: use.stepId,
+    stepLabel: use.stepLabel,
+    count: 1,
+    firstAt: use.at,
+    lastAt: use.at,
+  }
+  return [...list, added].slice(-SKILL_USES_MAX)
+}
+
+export type SkillGroups = {
+  /** The followed change's steps, in the order they were first reached. */
+  steps: { stepLabel: string; uses: { skill: string; isOpenSpec: boolean; count: number }[] }[]
+  /** Every other change (or none), with how many skill uses it has. */
+  others: { change: string; count: number }[]
+  last?: OpenSpecSkillUse
+}
+
+export const NO_CHANGE = '(no change)'
+
+export function groupSkillUses(
+  list: readonly OpenSpecSkillUse[],
+  followed: string | undefined,
+): SkillGroups {
+  const mine = list.filter(u => u.change === followed).sort((a, b) => a.firstAt - b.firstAt)
+  const steps: SkillGroups['steps'] = []
+  const byStep = new Map<string, SkillGroups['steps'][number]>()
+  for (const u of mine) {
+    let group = byStep.get(u.stepId)
+    if (!group) {
+      group = { stepLabel: u.stepLabel, uses: [] }
+      byStep.set(u.stepId, group)
+      steps.push(group)
+    }
+    group.uses.push({ skill: u.skill, isOpenSpec: u.isOpenSpec, count: u.count })
+  }
+  const counts = new Map<string, number>()
+  for (const u of list) {
+    if (u.change === followed) continue
+    const key = u.change ?? NO_CHANGE
+    counts.set(key, (counts.get(key) ?? 0) + u.count)
+  }
+  const last = list.reduce<OpenSpecSkillUse | undefined>(
+    (best, u) => (best === undefined || u.lastAt >= best.lastAt ? u : best),
+    undefined,
+  )
+  return { steps, others: [...counts].map(([change, count]) => ({ change, count })), last }
+}
+
 export function statusLine(
   active: OpenSpecActiveChange | undefined,
   steps: Step[],
 ): string | undefined {
   if (!active) return undefined
-  // The artifact being written (or next) says more than "Propose" does.
-  const now =
-    steps.find(s => s.state === 'writing') ??
-    steps.find(s => s.kind === 'artifact' && s.state === 'current') ??
-    steps.find(s => s.state === 'current')
+  const now = liveStep(steps)
   if (!now) return `OpenSpec: ${active.name}`
   const where = now.kind === 'artifact' ? 'Propose › ' : ''
   const verb = now.state === 'writing' ? 'writing ' : ''
