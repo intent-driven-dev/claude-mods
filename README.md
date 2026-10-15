@@ -12,8 +12,6 @@ Open-source mods for [Claude Code](https://claude.com/claude-code): live panes, 
 
 ## Install
 
-> While the repository is private, installing needs GitHub access to it: your `gh` or git credentials must be able to read `intent-driven-dev/claude-mods`.
-
 ### 1. Add the marketplace
 
 Do this once. At the prompt of a Claude Code session:

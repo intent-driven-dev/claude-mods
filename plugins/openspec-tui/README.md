@@ -65,8 +65,6 @@ At the prompt of a Claude Code terminal session:
 /plugin install openspec-tui --marketplace intent-driven-dev/claude-mods
 ```
 
-> While the repository is private, installing needs GitHub access to it: your `gh` or git credentials must be able to read `intent-driven-dev/claude-mods`.
-
 Answer `y` to add the marketplace, then pick a scope. The user scope is the default. The pane opens by itself in fullscreen mode when the terminal is at least 144 columns wide.
 
 ## Usage
